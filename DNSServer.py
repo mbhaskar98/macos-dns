@@ -45,7 +45,7 @@ class DNSQuery:
                 ini += lon + 1
                 lon = data[ini]
 
-    def respuesta(self, ip):
+    def response(self, ip):
         packet = b""
         if self.domain:
             packet += self.data[:2] + b"\x81\x80"
@@ -117,7 +117,7 @@ def query_and_send_back_ip(data, addr, reqtime):
             % (reqtime.strftime("%H:%M:%S.%f"), p.domain, addr[0])
         )
         ip = get_ip_address_by_domain(p.domain)
-        udps.sendto(p.respuesta(ip), addr)
+        udps.sendto(p.response(ip), addr)
         dis = datetime.now() - reqtime
 
         print(
