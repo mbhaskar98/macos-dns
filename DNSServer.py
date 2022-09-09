@@ -64,20 +64,14 @@ class DNSQuery:
 
 
 class DNSServer:
-    def __init__(self) -> None:
-        args = parser.parse_args()
-        print("Args passed --->", args)
-        self.hostsfile = args.file
-        self.udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    def __init__(self, file: str, blocked_domains: map, name_servers: list) -> None:
+        self.hostsfile = file
         self.host_ip_map: map = {}
-        self.blocked_domains: set = (
-            set(args.blocked_domains) if args.blocked_domains is not None else {}
-        )
-        self.name_servers: list = (
-            args.name_servers if args.name_servers is not None else []
-        )
+        self.blocked_domains = blocked_domains
+        self.name_servers = name_servers
         self.local_resolver: dns.resolver.Resolver = dns.resolver.Resolver()
         self.local_resolver.nameservers = self.name_servers
+        self.udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def start_server(self):
         if self.hostsfile is not None:
@@ -197,5 +191,14 @@ def usage():
 
 
 if __name__ == "__main__":
-    server = DNSServer()
+    args = parser.parse_args()
+    file = args.file
+    blocked_domains: set = (
+        set(args.blocked_domains) if args.blocked_domains is not None else {}
+    )
+    name_servers: list = args.name_servers if args.name_servers is not None else []
+    print("Args passed --->", args)
+    server = DNSServer(
+        file=file, blocked_domains=blocked_domains, name_servers=name_servers
+    )
     server.start_server()
