@@ -17,18 +17,20 @@ parser.add_argument(
     "--file", "-f", help="Path for hosts file", type=str, required=False
 )
 parser.add_argument(
-    "--blockDomains", "-b", help="List of domains to block", nargs="+", required=False
+    "--blocked_domains",
+    "-b",
+    help="List of domains to block",
+    nargs="+",
+    required=False,
 )
 parser.add_argument(
-    "--nameservers",
+    "--name_servers",
     "-n",
-    help="List of nameservers present on the machine",
+    help="List of self.name_servers present on the machine",
     nargs="+",
     required=False,
 )
 
-BLOCKEDDOMAINS = []
-NAMESERVERS = []
 
 # DNSQuery class from http://code.activestate.com/recipes/491264-mini-fake-dns-server/
 class DNSQuery:
@@ -61,29 +63,114 @@ class DNSQuery:
         return packet
 
 
-# get_ip_address by domain name
-def get_ip_address_by_domain(domain):
-    ip_address = "127.0.0.1"
-    domain: str = domain.rstrip(".")
-    if domain in host_ip_map:
-        ip_address = host_ip_map[domain]
-    elif domain in BLOCKEDDOMAINS:
-        return ""
-    else:
-        local_resolver = dns.resolver.Resolver()
-        local_resolver.nameservers = NAMESERVERS
-        answers: dns.resolver.Answer = local_resolver.resolve(domain)
-        ip_address = answers[0].address
+class DNSServer:
+    def __init__(self) -> None:
+        args = parser.parse_args()
+        print("Args passed --->", args)
+        self.hostsfile = args.file
+        self.udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.host_ip_map: map = {}
+        self.blocked_domains: set = (
+            set(args.blocked_domains) if args.blocked_domains is not None else {}
+        )
+        self.name_servers: list = (
+            args.name_servers if args.name_servers is not None else []
+        )
+        self.local_resolver: dns.resolver.Resolver = dns.resolver.Resolver()
+        self.local_resolver.nameservers = self.name_servers
 
-    # else:
-    #     list = socket.getaddrinfo(
-    #         domain,
-    #         80,
-    #         socket.AddressFamily.AF_UNSPEC
-    #     )
-    #     if len(list) > 0:
-    # ip_address = list[0][4][0]
-    return ip_address
+    def start_server(self):
+        if self.hostsfile is not None:
+            self.host_ip_map = self.get_host_ip_map(self.hostsfile)
+
+        try:
+            host = "127.0.0.1"
+            port = 53
+            print(f"######## Starting DNS server on {host}:{port} ")
+            self.udps.bind((host, port))
+        except Exception as e:
+            print("Failed to create socket on UDP port 53:", e)
+            sys.exit(1)
+
+        print("SimpleDNSServer :: hosts file -> %s\n" % self.hostsfile)
+
+        try:
+            while 1:
+                data, addr = self.udps.recvfrom(1024)
+                _thread.start_new_thread(
+                    self.query_and_send_back_ip, (data, addr, datetime.now())
+                )
+        except KeyboardInterrupt:
+            print("\n^C, Exit!")
+        except Exception as e:
+            print("\nError: %s" % e)
+        finally:
+            self.udps.close()
+
+    def get_host_ip_map(self, hostsfile):
+        host_ip_map = {}
+        try:
+            f = open(hostsfile)
+            for l in f.readlines():
+                if not l.startswith("#"):
+                    addrs = re.findall("[^\s]+", l)
+                    if len(addrs) > 1:
+                        for ad in addrs[1:]:
+                            host_ip_map[ad] = addrs[0]
+
+        except:
+            pass
+        finally:
+            if not f:
+                f.close()
+
+        return host_ip_map
+
+    def query_and_send_back_ip(self, data, addr, reqtime):
+        try:
+            p = DNSQuery(data)
+            print(
+                "%s Request domain: %s from %s"
+                % (reqtime.strftime("%H:%M:%S.%f"), p.domain, addr[0])
+            )
+            ip = self.get_ip_address_by_domain(p.domain)
+            self.udps.sendto(p.response(ip), addr)
+            dis = datetime.now() - reqtime
+
+            print(
+                "%s Request from %s cost %s : %s -> %s"
+                % (
+                    reqtime.strftime("%H:%M:%S.%f"),
+                    addr[0],
+                    dis.seconds + dis.microseconds / 1000000,
+                    p.domain,
+                    self.get_ip_address_by_domain(p.domain),
+                )
+            )
+        except Exception as e:
+            print("query for:%s error:%s" % (p.domain, e))
+
+    # get_ip_address by domain name
+    def get_ip_address_by_domain(self, domain):
+        ip_address = "127.0.0.1"
+        domain: str = domain.rstrip(".")
+        if domain in self.host_ip_map:
+            ip_address = self.host_ip_map[domain]
+        elif domain in self.blocked_domains:
+            return ""
+        else:
+            answers: dns.resolver.Answer = self.local_resolver.resolve(domain)
+            ip_address = answers[0].address
+
+        # else:
+        #     list = socket.getaddrinfo(
+        #         domain,
+        #         80,
+        #         socket.AddressFamily.AF_UNSPEC
+        #     )
+        #     if len(list) > 0:
+        # ip_address = list[0][4][0]
+        return ip_address
 
 
 def usage():
@@ -109,82 +196,6 @@ def usage():
     sys.exit(1)
 
 
-def query_and_send_back_ip(data, addr, reqtime):
-    try:
-        p = DNSQuery(data)
-        print(
-            "%s Request domain: %s from %s"
-            % (reqtime.strftime("%H:%M:%S.%f"), p.domain, addr[0])
-        )
-        ip = get_ip_address_by_domain(p.domain)
-        udps.sendto(p.response(ip), addr)
-        dis = datetime.now() - reqtime
-
-        print(
-            "%s Request from %s cost %s : %s -> %s"
-            % (
-                reqtime.strftime("%H:%M:%S.%f"),
-                addr[0],
-                dis.seconds + dis.microseconds / 1000000,
-                p.domain,
-                get_ip_address_by_domain(p.domain),
-            )
-        )
-    except Exception as e:
-        print("query for:%s error:%s" % (p.domain, e))
-
-
-def get_host_ip_map(hostsfile):
-    host_ip_map = {}
-    try:
-        f = open(hostsfile)
-        for l in f.readlines():
-            if not l.startswith("#"):
-                addrs = re.findall("[^\s]+", l)
-                if len(addrs) > 1:
-                    for ad in addrs[1:]:
-                        host_ip_map[ad] = addrs[0]
-
-    except:
-        pass
-    finally:
-        if not f:
-            f.close()
-
-    return host_ip_map
-
-
 if __name__ == "__main__":
-    args = parser.parse_args()
-    print("Args passed --->", args)
-    BLOCKEDDOMAINS = args.blockDomains
-    hostsfile = args.file
-    NAMESERVERS = args.nameservers
-    host_ip_map = {}
-    if hostsfile is not None:
-        host_ip_map = get_host_ip_map(hostsfile)
-
-    try:
-        udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        host = "127.0.0.1"
-        port = 53
-        print(f"######## Starting DNS server on {host}:{port} ")
-        udps.bind((host, port))
-    except Exception as e:
-        print("Failed to create socket on UDP port 53:", e)
-        sys.exit(1)
-
-    print("SimpleDNSServer :: hosts file -> %s\n" % hostsfile)
-
-    try:
-        while 1:
-            data, addr = udps.recvfrom(1024)
-            _thread.start_new_thread(
-                query_and_send_back_ip, (data, addr, datetime.now())
-            )
-    except KeyboardInterrupt:
-        print("\n^C, Exit!")
-    except Exception as e:
-        print("\nError: %s" % e)
-    finally:
-        udps.close()
+    server = DNSServer()
+    server.start_server()
