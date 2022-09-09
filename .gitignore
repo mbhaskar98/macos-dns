@@ -232,3 +232,10 @@ cython_debug/
 # Built Visual Studio Code Extensions
 
 \*.vsix
+
+# py2app created files
+SimpleDNSServer.spec
+setup.py
+
+# Mac
+.DS_Store

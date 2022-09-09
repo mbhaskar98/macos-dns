@@ -8,7 +8,27 @@ import re
 from datetime import datetime
 import time
 from xml import dom
-# import dns
+import argparse
+import dns.rdataclass, dns.resolver, dns.rdtypes
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument(
+    "--file", "-f", help="Path for hosts file", type=str, required=False
+)
+parser.add_argument(
+    "--blockDomains", "-b", help="List of domains to block", nargs="+", required=False
+)
+parser.add_argument(
+    "--nameservers",
+    "-n",
+    help="List of nameservers present on the machine",
+    nargs="+",
+    required=False,
+)
+
+BLOCKEDDOMAINS = []
+NAMESERVERS = []
 
 # DNSQuery class from http://code.activestate.com/recipes/491264-mini-fake-dns-server/
 class DNSQuery:
@@ -47,11 +67,22 @@ def get_ip_address_by_domain(domain):
     domain: str = domain.rstrip(".")
     if domain in host_ip_map:
         ip_address = host_ip_map[domain]
+    elif domain in BLOCKEDDOMAINS:
+        return ""
     else:
-        list = socket.getaddrinfo(domain, 80, family=socket.AddressFamily.AF_UNSPEC, )
-        if len(list) > 0:
-            ip_address = list[0][4][0]
+        local_resolver = dns.resolver.Resolver()
+        local_resolver.nameservers = NAMESERVERS
+        answers: dns.resolver.Answer = local_resolver.resolve(domain)
+        ip_address = answers[0].address
 
+    # else:
+    #     list = socket.getaddrinfo(
+    #         domain,
+    #         80,
+    #         socket.AddressFamily.AF_UNSPEC
+    #     )
+    #     if len(list) > 0:
+    # ip_address = list[0][4][0]
     return ip_address
 
 
@@ -124,20 +155,21 @@ def get_host_ip_map(hostsfile):
 
 
 if __name__ == "__main__":
-    hostsfile = None
+    args = parser.parse_args()
+    print("Args passed --->", args)
+    BLOCKEDDOMAINS = args.blockDomains
+    hostsfile = args.file
+    NAMESERVERS = args.nameservers
     host_ip_map = {}
-
-    if len(sys.argv) > 1:
-        if len(sys.argv) > 2 or sys.argv[-1] == "-h" or sys.argv[-1] == "--help":
-            usage()
-        else:
-            hostsfile = sys.argv[-1]
-            host_ip_map = get_host_ip_map(hostsfile)
+    if hostsfile is not None:
+        host_ip_map = get_host_ip_map(hostsfile)
 
     try:
         udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # 0.0.0.0:53
-        udps.bind(("127.0.0.1", 53))
+        host = "127.0.0.1"
+        port = 53
+        print(f"######## Starting DNS server on {host}:{port} ")
+        udps.bind((host, port))
     except Exception as e:
         print("Failed to create socket on UDP port 53:", e)
         sys.exit(1)
